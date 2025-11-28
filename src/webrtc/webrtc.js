@@ -1,7 +1,6 @@
 import Peer from "simple-peer/simplepeer.min.js";
 import io from "socket.io-client";
 
-// URLs and credentials for WebRTC and ICE servers
 const serverWebRTCUrl = import.meta.env.VITE_WEBRTC_URL;
 const iceServerUrl = import.meta.env.VITE_ICE_SERVER_URL;
 const iceServerUsername = import.meta.env.VITE_ICE_SERVER_USERNAME;
@@ -9,13 +8,8 @@ const iceServerCredential = import.meta.env.VITE_ICE_SERVER_CREDENTIAL;
 
 let socket = null;
 let peers = {};
-export let localMediaStream = null
+export let localMediaStream = null;
 
-/**
- * Initializes the WebRTC connection if supported.
- * @async
- * @function init
- */
 export const initWebRTC = async () => {
   if (Peer.WEBRTC_SUPPORT) {
     try {
@@ -29,36 +23,35 @@ export const initWebRTC = async () => {
     console.warn("WebRTC is not supported in this browser.");
   }
 };
+export function setLocalMediaStream(stream) {
+  localMediaStream = stream;
+}
 
-/**
- * Gets the user's media stream (audio only).
- * @async
- * @function getMedia
- * @returns {Promise<MediaStream>} The user's media stream.
- */
 async function getMedia() {
   try {
-    // Intentar cámara + micro (fallará en tu PC)
     return await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
   } catch (err) {
-    console.warn("No hay cámara. Usando pantalla compartida como fallback.");
+    console.warn("No hay cámara. Usando pantalla como fallback.");
 
     try {
-      // Obtener pantalla (esto sí te funciona)
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
-        audio: false, // 🔴 NO pedir audio aquí
+        audio: false,
       });
 
-      // Intentar agregar micrófono (si no existe, NO fallar)
       try {
         const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        audioStream.getAudioTracks().forEach(t => screenStream.addTrack(t));
-      } catch (errMic) {
-        console.warn("No hay micrófono disponible, solo pantalla será compartida.");
+
+        audioStream.getAudioTracks().forEach(t => {
+          screenStream.addTrack(t);
+        });
+
+      } catch {
+        console.warn("No hay micrófono, solo pantalla será compartida.");
       }
 
-      return screenStream; // 🔥 DEVOLVER SIEMPRE STREAM
+      return screenStream;
+
     } catch (err2) {
       console.error("Ni cámara ni pantalla disponibles:", err2);
       throw err2;
@@ -66,11 +59,6 @@ async function getMedia() {
   }
 }
 
-
-/**
- * Initializes the socket connection and sets up event listeners.
- * @function initSocketConnection
- */
 function initSocketConnection() {
   socket = io(serverWebRTCUrl);
 
@@ -80,12 +68,8 @@ function initSocketConnection() {
   socket.on("signal", handleSignal);
 }
 
-/**
- * Handles the introduction event.
- * @param {Array<string>} otherClientIds - Array of other client IDs.
- */
-function handleIntroduction(otherClientIds) {
-  otherClientIds.forEach((theirId) => {
+function handleIntroduction(ids) {
+  ids.forEach(theirId => {
     if (theirId !== socket.id) {
       peers[theirId] = { peerConnection: createPeerConnection(theirId, true) };
       createClientMediaElements(theirId);
@@ -93,38 +77,25 @@ function handleIntroduction(otherClientIds) {
   });
 }
 
-/**
- * Handles the new user connected event.
- * @param {string} theirId - The ID of the newly connected user.
- */
-function handleNewUserConnected(theirId) {
-  if (theirId !== socket.id && !(theirId in peers)) {
-    peers[theirId] = {};
-    createClientMediaElements(theirId);
+function handleNewUserConnected(id) {
+  if (id !== socket.id && !(id in peers)) {
+    peers[id] = {};
+    createClientMediaElements(id);
   }
 }
 
-/**
- * Handles the user disconnected event.
- * @param {string} _id - The ID of the disconnected user.
- */
-function handleUserDisconnected(_id) {
-  if (_id !== socket.id) {
-    removeClientAudioElement(_id);
-    delete peers[_id];
+function handleUserDisconnected(id) {
+  if (id !== socket.id) {
+    removeClientAudioElement(id);
+    delete peers[id];
   }
 }
 
-/**
- * Handles the signal event.
- * @param {string} to - The ID of the receiving user.
- * @param {string} from - The ID of the sending user.
- * @param {any} data - The signal data.
- */
 function handleSignal(to, from, data) {
   if (to !== socket.id) return;
 
   let peer = peers[from];
+
   if (peer && peer.peerConnection) {
     peer.peerConnection.signal(data);
   } else {
@@ -134,14 +105,7 @@ function handleSignal(to, from, data) {
   }
 }
 
-/**
- * Creates a new peer connection.
- * @function createPeerConnection
- * @param {string} theirSocketId - The socket ID of the peer.
- * @param {boolean} [isInitiator=false] - Whether the current client is the initiator.
- * @returns {Peer} The created peer connection.
- */
-function createPeerConnection(theirSocketId, isInitiator = false) {
+function createPeerConnection(id, isInitiator = false) {
   const iceServers = [];
 
   if (iceServerUrl) {
@@ -149,83 +113,43 @@ function createPeerConnection(theirSocketId, isInitiator = false) {
       .split(",")
       .map(url => url.trim())
       .filter(Boolean)
-      .map(url => {
-        if (!/^stun:|^turn:|^turns:/.test(url)) {
-          return `turn:${url}`;
-        }
-        return url;
-      });
+      .map(url => url.startsWith("stun:") || url.startsWith("turn:")
+        ? url
+        : `turn:${url}`
+      );
 
     urls.forEach(url => {
-      const serverConfig = { urls: url };
-      if (iceServerUsername) {
-        serverConfig.username = iceServerUsername;
-      }
-      if (iceServerCredential) {
-        serverConfig.credential = iceServerCredential;
-      }
-      iceServers.push(serverConfig);
+      const cfg = { urls: url };
+      if (iceServerUsername) cfg.username = iceServerUsername;
+      if (iceServerCredential) cfg.credential = iceServerCredential;
+      iceServers.push(cfg);
     });
   }
 
   if (!iceServers.length) {
     iceServers.push({ urls: "stun:stun.l.google.com:19302" });
-  } else {
-    const hasTurn = iceServers.some(server =>
-      Array.isArray(server.urls)
-        ? server.urls.some(url => url.startsWith("turn:") || url.startsWith("turns:"))
-        : server.urls.startsWith("turn:") || server.urls.startsWith("turns:")
-    );
-    if (!hasTurn) {
-      iceServers.push({ urls: "stun:stun.l.google.com:19302" });
-    }
   }
 
-  const peerConnection = new Peer({
+  const peer = new Peer({
     initiator: isInitiator,
-    config: {
-      iceServers,
-    },
+    config: { iceServers }
   });
 
-  peerConnection.on("signal", (data) =>
-    socket.emit("signal", theirSocketId, socket.id, data)
-  );
-  peerConnection.on("connect", () =>
-    peerConnection.addStream(localMediaStream)
-  );
-  peerConnection.on("stream", (stream) =>
-    updateClientMediaElements(theirSocketId, stream)
-  );
+  peer.on("signal", data => socket.emit("signal", id, socket.id, data));
+  peer.on("connect", () => peer.addStream(localMediaStream));
+  peer.on("stream", stream => updateClientMediaElements(id, stream));
 
-  return peerConnection;
+  return peer;
 }
 
-/**
- * Disables the outgoing media stream.
- * @function disableOutgoingStream
- */
 export function disableOutgoingStream() {
-  localMediaStream.getTracks().forEach((track) => {
-    track.enabled = false;
-  });
+  localMediaStream.getTracks().forEach(track => (track.enabled = false));
 }
 
-/**
- * Enables the outgoing media stream.
- * @function enableOutgoingStream
- */
 export function enableOutgoingStream() {
-  localMediaStream.getTracks().forEach((track) => {
-    track.enabled = true;
-  });
+  localMediaStream.getTracks().forEach(track => (track.enabled = true));
 }
 
-/**
- * Creates media elements for a client.
- * @function createClientMediaElements
- * @param {string} _id - The ID of the client.
- */
 function createClientMediaElements(id) {
   const container = document.getElementById("remote-videos");
   if (!container) return;
@@ -243,36 +167,20 @@ function createClientMediaElements(id) {
   const audioEl = document.createElement("audio");
   audioEl.id = `${id}_audio`;
   audioEl.autoplay = true;
-  audioEl.controls = false;
 
   wrapper.appendChild(videoEl);
   wrapper.appendChild(audioEl);
   container.appendChild(wrapper);
 }
 
-
-/**
- * Updates media elements for a client with a new stream.
- * @function updateClientMediaElements
- * @param {string} _id - The ID of the client.
- * @param {MediaStream} stream - The new media stream.
- */
 function updateClientMediaElements(id, stream) {
-  const videoEl = document.getElementById(`${id}_video`);
-  if (videoEl) videoEl.srcObject = stream;
-
-  const audioEl = document.getElementById(`${id}_audio`);
-  if (audioEl) audioEl.srcObject = stream;
+  const v = document.getElementById(`${id}_video`);
+  const a = document.getElementById(`${id}_audio`);
+  if (v) v.srcObject = stream;
+  if (a) a.srcObject = stream;
 }
 
-
-/**
- * Removes media elements for a client.
- * @function removeClientAudioElement
- * @param {string} _id - The ID of the client.
- */
 function removeClientAudioElement(id) {
-  const wrapper = document.getElementById(`${id}_wrapper`);
-  if (wrapper) wrapper.remove();
+  const w = document.getElementById(`${id}_wrapper`);
+  if (w) w.remove();
 }
-
