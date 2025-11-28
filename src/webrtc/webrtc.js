@@ -9,7 +9,7 @@ const iceServerCredential = import.meta.env.VITE_ICE_SERVER_CREDENTIAL;
 
 let socket = null;
 let peers = {};
-let localMediaStream = null;
+export let localMediaStream = null
 
 /**
  * Initializes the WebRTC connection if supported.
@@ -20,6 +20,7 @@ export const initWebRTC = async () => {
   if (Peer.WEBRTC_SUPPORT) {
     try {
       localMediaStream = await getMedia();
+      window.localStream = localMediaStream;
       initSocketConnection();
     } catch (error) {
       console.error("Failed to initialize WebRTC connection:", error);
@@ -37,12 +38,34 @@ export const initWebRTC = async () => {
  */
 async function getMedia() {
   try {
-    return await navigator.mediaDevices.getUserMedia({ audio: true });
+    // Intentar cámara + micro (fallará en tu PC)
+    return await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
   } catch (err) {
-    console.error("Failed to get user media:", err);
-    throw err;
+    console.warn("No hay cámara. Usando pantalla compartida como fallback.");
+
+    try {
+      // Obtener pantalla (esto sí te funciona)
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: false, // 🔴 NO pedir audio aquí
+      });
+
+      // Intentar agregar micrófono (si no existe, NO fallar)
+      try {
+        const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioStream.getAudioTracks().forEach(t => screenStream.addTrack(t));
+      } catch (errMic) {
+        console.warn("No hay micrófono disponible, solo pantalla será compartida.");
+      }
+
+      return screenStream; // 🔥 DEVOLVER SIEMPRE STREAM
+    } catch (err2) {
+      console.error("Ni cámara ni pantalla disponibles:", err2);
+      throw err2;
+    }
   }
 }
+
 
 /**
  * Initializes the socket connection and sets up event listeners.
@@ -203,17 +226,30 @@ export function enableOutgoingStream() {
  * @function createClientMediaElements
  * @param {string} _id - The ID of the client.
  */
-function createClientMediaElements(_id) {
-  const audioEl = document.createElement("audio");
-  audioEl.id = `${_id}_audio`;
-  audioEl.controls = false;
-  audioEl.volume = 1;
-  document.body.appendChild(audioEl);
+function createClientMediaElements(id) {
+  const container = document.getElementById("remote-videos");
+  if (!container) return;
 
-  audioEl.addEventListener("loadeddata", () => {
-    audioEl.play();
-  });
+  const wrapper = document.createElement("div");
+  wrapper.id = `${id}_wrapper`;
+  wrapper.className = "remote-video-wrapper";
+
+  const videoEl = document.createElement("video");
+  videoEl.id = `${id}_video`;
+  videoEl.autoplay = true;
+  videoEl.playsInline = true;
+  videoEl.className = "w-48 h-36 bg-black rounded";
+
+  const audioEl = document.createElement("audio");
+  audioEl.id = `${id}_audio`;
+  audioEl.autoplay = true;
+  audioEl.controls = false;
+
+  wrapper.appendChild(videoEl);
+  wrapper.appendChild(audioEl);
+  container.appendChild(wrapper);
 }
+
 
 /**
  * Updates media elements for a client with a new stream.
@@ -221,21 +257,22 @@ function createClientMediaElements(_id) {
  * @param {string} _id - The ID of the client.
  * @param {MediaStream} stream - The new media stream.
  */
-function updateClientMediaElements(_id, stream) {
-  const audioEl = document.getElementById(`${_id}_audio`);
-  if (audioEl) {
-    audioEl.srcObject = new MediaStream([stream.getAudioTracks()[0]]);
-  }
+function updateClientMediaElements(id, stream) {
+  const videoEl = document.getElementById(`${id}_video`);
+  if (videoEl) videoEl.srcObject = stream;
+
+  const audioEl = document.getElementById(`${id}_audio`);
+  if (audioEl) audioEl.srcObject = stream;
 }
+
 
 /**
  * Removes media elements for a client.
  * @function removeClientAudioElement
  * @param {string} _id - The ID of the client.
  */
-function removeClientAudioElement(_id) {
-  const audioEl = document.getElementById(`${_id}_audio`);
-  if (audioEl) {
-    audioEl.remove();
-  }
+function removeClientAudioElement(id) {
+  const wrapper = document.getElementById(`${id}_wrapper`);
+  if (wrapper) wrapper.remove();
 }
+
