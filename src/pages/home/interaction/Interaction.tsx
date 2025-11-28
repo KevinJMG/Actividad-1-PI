@@ -5,6 +5,7 @@ import { initWebRTC, setLocalMediaStream, localMediaStream } from "../../../webr
 declare global {
   interface Window {
     localStream?: MediaStream;
+    peerConnection?: RTCPeerConnection;
   }
 }
 
@@ -90,53 +91,68 @@ export default function Interaction() {
   };
 
   const toggleScreenShare = async () => {
-    if (!localMediaStream) return;
+  if (!localMediaStream) return;
 
-    if (!screenSharing) {
-      try {
-        const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-        const screenTrack = screenStream.getVideoTracks()[0];
+  if (!screenSharing) {
+    try {
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      const screenTrack = screenStream.getVideoTracks()[0];
 
-        const camTrack = localMediaStream.getVideoTracks()[0];
-        if (camTrack) camTrack.stop();
+      const camTrack = localMediaStream.getVideoTracks()[0];
+      if (camTrack) camTrack.stop();
 
-        localMediaStream.addTrack(screenTrack);
-        setScreenSharing(true);
-      } catch (err) {
-        console.error("Error al compartir pantalla:", err);
-      }
-    } else {
-      try {
-        const camStream = await navigator.mediaDevices.getUserMedia({ video: true });
-        const newCamTrack = camStream.getVideoTracks()[0];
-
-        const oldScreenTrack = localMediaStream.getVideoTracks()[0];
-        if (oldScreenTrack) oldScreenTrack.stop();
-
-        localMediaStream.addTrack(newCamTrack);
-        setScreenSharing(false);
-      } catch (err) {
-        console.error("Error al volver a cámara:", err);
-      }
+      localMediaStream.addTrack(screenTrack);
+      setScreenSharing(true);
+    } catch (err) {
+      console.error("Error al compartir pantalla:", err);
     }
-  };
+  } else {
+    try {
+      const camStream = await navigator.mediaDevices.getUserMedia({ video: true });
+      const newCamTrack = camStream.getVideoTracks()[0];
+
+      const oldScreenTrack = localMediaStream.getVideoTracks()[0];
+      if (oldScreenTrack) oldScreenTrack.stop();
+
+      localMediaStream.addTrack(newCamTrack);
+      setScreenSharing(false);
+    } catch (err) {
+      console.error("Error al volver a cámara:", err);
+    }
+  }
+};
+
 
   return (
-    <div className="flex flex-col justify-between h-full p-4">
-      {/* VIDEO LOCAL */}
-      <div>
-        <h2 className="text-lg font-semibold mb-2 text-white">Tu video</h2>
-        <video
-          ref={localVideoRef}
-          autoPlay
-          muted
-          playsInline
-          className="w-full max-w-xl bg-black rounded-lg"
-        />
+    <div className="flex flex-col h-full relative">
+
+      {/* VIDEO LOCAL FLOTANTE */}
+      <video
+        ref={localVideoRef}
+        autoPlay
+        muted
+        playsInline
+        className="w-40 h-28 rounded-lg shadow-lg bg-black absolute bottom-28 right-4 border border-gray-700 z-50"
+      />
+
+      {/* GRID DE VIDEOS REMOTOS */}
+      <div className="flex-1 overflow-auto p-4">
+        <div
+          id="remote-videos"
+          className="
+            grid gap-4
+            grid-cols-1 
+            sm:grid-cols-2 
+            md:grid-cols-3 
+            lg:grid-cols-4 
+            auto-rows-[200px]
+          "
+        ></div>
       </div>
 
-      {/* BOTONERA INFERIOR */}
-      <div className="w-full flex justify-center gap-6 py-6 bg-black/20 rounded-xl">
+      {/* CONTROLES DE ABAJO */}
+      <div className="absolute bottom-0 left-0 w-full flex justify-center gap-6 py-4 bg-black/40 backdrop-blur-md">
+
         {!started && (
           <button
             onClick={startCall}
@@ -150,32 +166,27 @@ export default function Interaction() {
           <>
             <button
               onClick={toggleCamera}
-              className={`px-4 py-4 rounded-full shadow ${camEnabled ? "bg-gray-700" : "bg-red-600"} text-white`}
+              className={`p-4 rounded-full shadow ${camEnabled ? "bg-gray-700" : "bg-red-600"} text-white`}
             >
-              {camEnabled ? "🎥" : "🚫🎥"}
+              {camEnabled ? "🎥" : "🚫"}
             </button>
 
             <button
               onClick={toggleMic}
-              className={`px-4 py-4 rounded-full shadow ${micEnabled ? "bg-gray-700" : "bg-red-600"} text-white`}
+              className={`p-4 rounded-full shadow ${micEnabled ? "bg-gray-700" : "bg-red-600"} text-white`}
             >
               {micEnabled ? "🎤" : "🔇"}
             </button>
 
             <button
               onClick={toggleScreenShare}
-              className="bg-gray-700 text-white px-4 py-4 rounded-full shadow"
+              className="p-4 rounded-full shadow bg-gray-700 text-white"
             >
               🖥️
             </button>
           </>
         )}
-      </div>
 
-      {/* VIDEOS REMOTOS */}
-      <div className="mt-4">
-        <h2 className="text-lg font-semibold mb-2 text-white">Videos remotos</h2>
-        <div id="remote-videos" className="flex flex-wrap gap-3"></div>
       </div>
     </div>
   );
