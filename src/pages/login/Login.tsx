@@ -33,7 +33,7 @@ const Login: React.FC = () => {
         displayName: fbUser.displayName,
       });
 
-      console.log("🔥 Login exitoso");
+      console.log("Login exitoso");
       navigate("/home");
 
     } catch (err) {
@@ -50,7 +50,6 @@ const Login: React.FC = () => {
         onClick={handleGoogleLogin}
         className="flex items-center gap-3 px-6 py-3 bg-white text-black rounded-lg shadow hover:bg-gray-200 transition"
       >
-        <img src="/google.png" alt="Google" width={24} height={24} />
         Iniciar con Google
       </button>
     </div>
