@@ -69,3 +69,7 @@ h2 {
 .container-page > div > div:last-child > button img {
   @apply w-6 h-6;
 }
+
+input, textarea {
+  @apply text-white;
+}
