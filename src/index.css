@@ -70,6 +70,3 @@ h2 {
   @apply w-6 h-6;
 }
 
-input, textarea {
-  @apply text-white;
-}

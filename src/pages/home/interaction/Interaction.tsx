@@ -6,81 +6,98 @@ declare global {
   interface Window {
     localStream?: MediaStream;
     peerConnection?: RTCPeerConnection;
+    camTrack?: MediaStreamTrack;
+  }
+}
+//Metodo para limpiar los usuarios duplicados, o desconectados
+function cleanupWebRTC() {
+  try {
+    // Detener y limpiar stream local
+    if (window.localStream) {
+      window.localStream.getTracks().forEach(t => t.stop());
+      window.localStream = undefined;
+    }
+
+    // Cerrar peerConnection
+    if (window.peerConnection) {
+      window.peerConnection.ontrack = null;
+      window.peerConnection.onicecandidate = null;
+      window.peerConnection.onconnectionstatechange = null;
+      window.peerConnection.close();
+      window.peerConnection = undefined;
+    }
+
+    // Eliminar videos remotos
+    const vids = document.querySelectorAll(".remote-video");
+    vids.forEach(v => v.remove());
+
+  } catch (e) {
+    console.warn("Error en cleanup:", e);
   }
 }
 
 export default function Interaction() {
   const [camEnabled, setCamEnabled] = useState(true);
   const [micEnabled, setMicEnabled] = useState(true);
-  const [screenSharing, setScreenSharing] = useState(false);
   const [started, setStarted] = useState(false);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
 
   const startCall = useCallback(async () => {
-    if (started) return;
-    setStarted(true);
+  if (started) return;
+  cleanupWebRTC()
+  setStarted(true);
 
-    // Preguntar al usuario qué quiere usar
-    const choice = window.prompt(
-      "¿Qué quieres usar?\n1 = Cámara + micrófono\n2 = Compartir pantalla\n3 = Solo micrófono",
-      "1"
-    );
+  // Preguntar al usuario qué quiere usar
+  const choice = window.prompt(
+    "¿Qué quieres usar?\n1 = Cámara + micrófono\n2 = Solo micrófono",
+    "1"
+  );
 
-    try {
-      let stream: MediaStream;
+  try {
+    let stream: MediaStream;
 
-      if (choice === "1") {
-        // Cámara + micrófono
-        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      } else if (choice === "2") {
-        // Compartir pantalla
-        stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
-
-        // Intentar añadir micrófono si existe
-        try {
-          const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          audioStream.getAudioTracks().forEach((t: MediaStreamTrack) => stream.addTrack(t));
-        } catch {
-          console.warn("No hay micrófono disponible, solo pantalla será compartida.");
-        }
-      } else if (choice === "3") {
-        // Solo micrófono
-        stream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
-      } else {
-        // Por defecto: cámara + micrófono
-        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      }
-
-      // Guardar stream en webrtc.js
-      setLocalMediaStream(stream);
-      window.localStream = stream;
-
-      // Inicializar WebRTC
-      await initWebRTC();
-
-      // Mostrar video local
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-        localVideoRef.current.play().catch(() => {});
-      }
-
-    } catch (err) {
-      console.error("Error al obtener media:", err);
-      alert("No se pudo acceder a la cámara o al micrófono.");
-      setStarted(false);
+    if (choice === "1") {
+      // Cámara + micrófono
+      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      window.camTrack = stream.getVideoTracks()[0];
+    } else if (choice === "2") {
+      // Solo micrófono
+      stream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+    } else {
+      // Por defecto: cámara + micrófono
+      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      window.camTrack = stream.getVideoTracks()[0];
     }
-  }, [started]);
 
-  const toggleCamera = () => {
-    if (!localMediaStream) return;
-    const videoTrack = localMediaStream.getTracks().find((t: MediaStreamTrack) => t.kind === "video");
+    // Guardar stream en webrtc.js
+    setLocalMediaStream(stream);
+    window.localStream = stream;
+
+    // Inicializar WebRTC
+    await initWebRTC();
+
+    // Mostrar video local
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = stream;
+      localVideoRef.current.play().catch(() => {});
+    }
+
+  } catch (err) {
+    console.error("Error al obtener media:", err);
+    alert("No se pudo acceder a la cámara o al micrófono.");
+    setStarted(false);
+  }
+}, [started]);
+  // Habilitar y desactivar camara
+    const toggleCamera = () => {
+    const videoTrack = window.camTrack;
     if (videoTrack) {
       videoTrack.enabled = !videoTrack.enabled;
       setCamEnabled(videoTrack.enabled);
     }
   };
-
+  //Habilitar y desactivar microfono
   const toggleMic = () => {
     if (!localMediaStream) return;
     const audioTrack = localMediaStream.getTracks().find((t: MediaStreamTrack) => t.kind === "audio");
@@ -89,39 +106,6 @@ export default function Interaction() {
       setMicEnabled(audioTrack.enabled);
     }
   };
-
-  const toggleScreenShare = async () => {
-  if (!localMediaStream) return;
-
-  if (!screenSharing) {
-    try {
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-      const screenTrack = screenStream.getVideoTracks()[0];
-
-      const camTrack = localMediaStream.getVideoTracks()[0];
-      if (camTrack) camTrack.stop();
-
-      localMediaStream.addTrack(screenTrack);
-      setScreenSharing(true);
-    } catch (err) {
-      console.error("Error al compartir pantalla:", err);
-    }
-  } else {
-    try {
-      const camStream = await navigator.mediaDevices.getUserMedia({ video: true });
-      const newCamTrack = camStream.getVideoTracks()[0];
-
-      const oldScreenTrack = localMediaStream.getVideoTracks()[0];
-      if (oldScreenTrack) oldScreenTrack.stop();
-
-      localMediaStream.addTrack(newCamTrack);
-      setScreenSharing(false);
-    } catch (err) {
-      console.error("Error al volver a cámara:", err);
-    }
-  }
-};
-
 
   return (
     <div className="flex flex-col h-full relative">
@@ -178,12 +162,6 @@ export default function Interaction() {
               {micEnabled ? "🎤" : "🔇"}
             </button>
 
-            <button
-              onClick={toggleScreenShare}
-              className="p-4 rounded-full shadow bg-gray-700 text-white"
-            >
-              🖥️
-            </button>
           </>
         )}
 
